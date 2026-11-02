@@ -82,10 +82,14 @@ label.chk{display:flex;gap:10px;align-items:center;margin:6px 0}
   <label class="chk"><input type="checkbox" id="shQ" checked> ترتيب الأسئلة عشوائي</label>
   <label class="chk"><input type="checkbox" id="shO"> ترتيب الخيارات عشوائي</label>
   <label class="chk"><input type="checkbox" id="exam"> وضع الامتحان (لا تظهر الإجابات إلا في النهاية، ويمكنك تغيير إجابتك)</label>
+  <label class="chk"><input type="checkbox" id="fresh"> أسئلة جديدة فقط (تخطَّ الأسئلة التي سبق أن اختبرت بها)</label>
+  <p class="muted small" id="prog" style="margin:0 0 6px"></p>
 
   <div class="row"><button class="btn" id="go" disabled>ابدأ الاختبار</button>
     <button class="btn ghost" id="mist">أخطائي المحفوظة (<span id="mc">0</span>)</button>
-    <button class="btn ghost" id="pm">تدرّب على أخطائي</button></div>
+    <button class="btn ghost" id="pm">تدرّب على أخطائي</button>
+    <a class="btn ghost" href="glossary.html" style="text-decoration:none">قاموس المصطلحات</a>
+    <button class="btn ghost" id="resetp">تصفير تقدّمي</button></div>
   <p id="msg" class="muted small"></p>
   <div id="histbox" class="hide"><h2>آخر النتائج</h2><div id="hist" class="small muted"></div></div>
   <input type="file" id="file" accept=".json" class="hide">
@@ -140,11 +144,16 @@ const shuffle=a=>{a=a.slice();for(let k=a.length-1;k>0;k--){const j=Math.floor(M
 const show=id=>["start","quiz","end","mistakes"].forEach(s=>$(s).classList.toggle("hide",s!==id));
 let ALL=[],TXT=[],IMG=[],run=[],ans=[],i=0,cfg={exam:false,shO:false,shQ:true},lastList=[],lastMode="",reviewFilter="all";
 
+const DK="cq_seen";
+const seenMap=()=>{let m=LS.get(DK,null);if(m===null){m={};[LS.get("cq_done",{}),LS.get("cq_wrong",{})].forEach(o=>Object.keys(o).forEach(k=>m[k]=1));LS.set(DK,m)}return m};
+function markSeen(id){const m=seenMap();if(!m[id]){m[id]=1;LS.set(DK,m)}}
+function pools(){const fr=$("fresh").checked,dn=seenMap();return {T:fr?TXT.filter(q=>!dn[q.id]):TXT,I:fr?IMG.filter(q=>!dn[q.id]):IMG,dn}}
+function updPools(){const p=pools();$("tmax").textContent=`(حتى ${p.T.length})`;$("imax").textContent=`(حتى ${p.I.length})`;$("nT").max=p.T.length;$("nI").max=p.I.length;
+  const n=ALL.filter(q=>p.dn[q.id]).length;$("prog").textContent=`سبق أن اختبرت بـ ${n} من ${ALL.length} سؤالًا، والمتبقي ${ALL.length-n} لم تُسأل عنها بعد.`}
 function ready(d){
   ALL=d;TXT=d.filter(q=>!q.image);IMG=d.filter(q=>q.image);
   $("avail").textContent=`المتوفر: ${TXT.length} سؤال نصي و ${IMG.length} سؤال بالصور`;
-  $("tmax").textContent=`(حتى ${TXT.length})`;$("imax").textContent=`(حتى ${IMG.length})`;
-  $("nT").max=TXT.length;$("nI").max=IMG.length;$("go").disabled=false;refreshStart();
+  $("go").disabled=false;refreshStart();
 }
 fetch("questions.json").then(r=>r.json()).then(ready).catch(()=>{
   $("avail").textContent="تعذر تحميل ملف الأسئلة. اختر ملف questions.json يدويًا:";$("file").classList.remove("hide");});
@@ -156,9 +165,10 @@ function refreshStart(){
   const h=LS.get("cq_hist",[]);$("histbox").classList.toggle("hide",!h.length);
   $("hist").innerHTML="";h.slice(-5).reverse().forEach(r=>{const d=document.createElement("div");
     d.textContent=`${new Date(r.t).toLocaleDateString("ar")} — ${r.s} / ${r.n} (${Math.round(r.s/r.n*100)}%) — ${r.m}`;$("hist").appendChild(d);});
+  updPools();
 }
 document.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{
-  const p=b.dataset.p,T=TXT.length,I=IMG.length;
+  const p=b.dataset.p,pl=pools(),T=pl.T.length,I=pl.I.length;
   if(p==="text"){$("nT").value=Math.min(20,T);$("nI").value=0}
   if(p==="img"){$("nT").value=0;$("nI").value=Math.min(20,I)}
   if(p==="mix"){$("nT").value=Math.min(20,T);$("nI").value=Math.min(10,I)}
@@ -181,9 +191,14 @@ $("go").onclick=()=>{
   readCfg();const nT=+$("nT").value||0,nI=+$("nI").value||0;
   if(nT+nI<=0){$("msg").textContent="اختر عددًا واحدًا على الأقل من الأسئلة.";return}
   $("msg").textContent="";
-  const mode=nT&&nI?"مزيج":nI?"صور":"نصي";
-  begin(sample(TXT,nT).concat(sample(IMG,nI)),mode);
+  const pl=pools(),fr=$("fresh").checked;
+  const mode=(nT&&nI?"مزيج":nI?"صور":"نصي")+(fr?" · أسئلة جديدة":"");
+  const lt=sample(pl.T,nT),li=sample(pl.I,nI);
+  if(!lt.length&&!li.length){$("msg").textContent=fr?"سبق أن اختبرت بكل الأسئلة من هذا النوع. يمكنك تصفير تقدّمك أو إلغاء هذا الخيار.":"لا توجد أسئلة.";return}
+  begin(lt.concat(li),mode);
 };
+$("fresh").onchange=updPools;
+$("resetp").onclick=()=>{if(confirm("هل تريد تصفير تقدّمك؟ سيعود كل سؤال إلى «لم يُسأل بعد». (قائمة الأخطاء المحفوظة تبقى كما هي)")){LS.set(DK,{});updPools()}};
 function practiceMistakes(){
   readCfg();const w=LS.get("cq_wrong",{});const l=ALL.filter(q=>w[q.id]);
   if(l.length)begin(l,"أخطائي");
@@ -192,7 +207,7 @@ $("pm").onclick=practiceMistakes;
 
 function locked(){return !cfg.exam&&ans[i]!==null}
 function render(){
-  const it=run[i],q=it.q,lk=locked();
+  const it=run[i],q=it.q,lk=locked();markSeen(q.id);
   $("pos").textContent=`السؤال ${i+1} من ${run.length}`;
   const done=ans.filter(a=>a!==null).length;
   $("sc").textContent=cfg.exam?`أجبت: ${done} / ${run.length}`:`الصحيح: ${run.reduce((s,r,k)=>s+(ans[k]===r.q.correct?1:0),0)}`;
